@@ -154,6 +154,9 @@ class DeepAREstimator(GluonEstimator):
     num_imputation_samples
         How many samples to use to impute values when
         impute_missing_values=True
+    nonnegative_fcsts
+        Should the generated forecasts be non-negative? If yes, an activation
+        function is applied to ensure non-negativity.
     """
 
     @validated()
@@ -189,6 +192,7 @@ class DeepAREstimator(GluonEstimator):
         minimum_scale: float = 1e-10,
         impute_missing_values: bool = False,
         num_imputation_samples: int = 1,
+        nonnegative_fcsts: bool = False,
     ) -> None:
         super().__init__(trainer=trainer, batch_size=batch_size, dtype=dtype)
 
@@ -285,6 +289,7 @@ class DeepAREstimator(GluonEstimator):
         self.default_scale = default_scale
         self.minimum_scale = minimum_scale
         self.impute_missing_values = impute_missing_values
+        self.nonnegative_fcsts = nonnegative_fcsts
 
     @classmethod
     def derive_auto_fields(cls, train_iter):
@@ -470,6 +475,7 @@ class DeepAREstimator(GluonEstimator):
             default_scale=self.default_scale,
             minimum_scale=self.minimum_scale,
             impute_missing_values=self.impute_missing_values,
+            nonnegative_fcsts=self.nonnegative_fcsts,
         )
 
         copy_parameters(trained_network, prediction_network)
