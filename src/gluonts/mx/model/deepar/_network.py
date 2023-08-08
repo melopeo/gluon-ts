@@ -57,6 +57,7 @@ class DeepARNetwork(mx.gluon.HybridBlock):
         impute_missing_values: bool = False,
         default_scale: Optional[float] = None,
         nonnegative_fcsts: bool = False,
+        num_samples_for_loss: int = 100,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -74,6 +75,7 @@ class DeepARNetwork(mx.gluon.HybridBlock):
         self.scaling = scaling
         self.dtype = dtype
         self.nonnegative_fcsts = nonnegative_fcsts
+        self.num_samples_for_loss = num_samples_for_loss
 
         assert len(cardinality) == len(embedding_dimension), (
             "embedding_dimension should be a list with the same size as"
@@ -813,6 +815,48 @@ class DeepARNetwork(mx.gluon.HybridBlock):
         return samples
 
 
+    def get_samples_for_loss(self, distr: Distribution) -> Tensor:
+        """
+        Get samples to compute the final loss. These are samples directly drawn
+        from the given `distr` if coherence is not enforced yet; otherwise the
+        drawn samples are reconciled.
+
+        Parameters
+        ----------
+        distr
+            Distribution instances
+
+        Returns
+        -------
+        samples
+            Tensor with shape (num_samples, batch_size, seq_len, target_dim)
+        """
+
+        # samples shape: (num_samples, batch_size, seq_len, target_dim)
+        samples = distr.sample_rep(
+            num_samples=self.num_samples_for_loss, dtype="float32"
+        )
+
+        # Determine which epoch we are currently in.
+        self.batch_no += 1
+        epoch_no = self.batch_no // self.num_batches_per_epoch + 1
+        epoch_frac = epoch_no / self.epochs
+
+        if (
+            self.coherent_train_samples
+            and epoch_frac > self.warmstart_epoch_frac
+        ):
+            coherent_samples = reconcile_samples(
+                reconciliation_mat=self.M,
+                samples=samples,
+                seq_axis=self.seq_axis,
+            )
+            assert_shape(coherent_samples, samples.shape)
+            return coherent_samples
+        else:
+            return samples
+
+
 class DeepARTrainingNetwork(DeepARNetwork):
     @validated()
     def __init__(self, alpha: float = 0, beta: float = 0, **kwargs) -> None:
@@ -955,6 +999,9 @@ class DeepARTrainingNetwork(DeepARNetwork):
             future_target,
             dim=1,
         )
+
+        # pedroml: efforts to compute nonnegative fcsts for deepar
+        samples = self.get_samples_for_loss(distr=distr)
 
         # (batch_size, seq_len)
         loss = distr.loss(target)

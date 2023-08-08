@@ -193,6 +193,7 @@ class DeepAREstimator(GluonEstimator):
         impute_missing_values: bool = False,
         num_imputation_samples: int = 1,
         nonnegative_fcsts: bool = False,
+        num_samples_for_loss: int = 100,
     ) -> None:
         super().__init__(trainer=trainer, batch_size=batch_size, dtype=dtype)
 
@@ -290,6 +291,7 @@ class DeepAREstimator(GluonEstimator):
         self.minimum_scale = minimum_scale
         self.impute_missing_values = impute_missing_values
         self.nonnegative_fcsts = nonnegative_fcsts
+        self.num_samples_for_loss = num_samples_for_loss
 
     @classmethod
     def derive_auto_fields(cls, train_iter):
@@ -448,6 +450,7 @@ class DeepAREstimator(GluonEstimator):
             default_scale=self.default_scale,
             minimum_scale=self.minimum_scale,
             impute_missing_values=self.impute_missing_values,
+            num_samples_for_loss=self.num_samples_for_loss,
         )
 
     def create_predictor(
