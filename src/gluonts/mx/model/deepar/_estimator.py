@@ -192,7 +192,8 @@ class DeepAREstimator(GluonEstimator):
         minimum_scale: float = 1e-10,
         impute_missing_values: bool = False,
         num_imputation_samples: int = 1,
-        nonnegative_fcsts: bool = False,
+        nonnegative_train_samples: bool = False,
+        nonnegative_pred_samples: bool = False,
         num_samples_for_loss: int = 100,
     ) -> None:
         super().__init__(trainer=trainer, batch_size=batch_size, dtype=dtype)
@@ -290,7 +291,8 @@ class DeepAREstimator(GluonEstimator):
         self.default_scale = default_scale
         self.minimum_scale = minimum_scale
         self.impute_missing_values = impute_missing_values
-        self.nonnegative_fcsts = nonnegative_fcsts
+        self.nonnegative_train_samples = nonnegative_train_samples
+        self.nonnegative_pred_samples = nonnegative_pred_samples
         self.num_samples_for_loss = num_samples_for_loss
 
     @classmethod
@@ -450,6 +452,7 @@ class DeepAREstimator(GluonEstimator):
             default_scale=self.default_scale,
             minimum_scale=self.minimum_scale,
             impute_missing_values=self.impute_missing_values,
+            nonnegative_train_samples=self.nonnegative_train_samples,
             num_samples_for_loss=self.num_samples_for_loss,
         )
 
@@ -478,7 +481,7 @@ class DeepAREstimator(GluonEstimator):
             default_scale=self.default_scale,
             minimum_scale=self.minimum_scale,
             impute_missing_values=self.impute_missing_values,
-            nonnegative_fcsts=self.nonnegative_fcsts,
+            nonnegative_pred_samples=self.nonnegative_pred_samples,
         )
 
         copy_parameters(trained_network, prediction_network)
