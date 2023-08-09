@@ -30,7 +30,7 @@ from gluonts.mx.block.regularization import (
 from gluonts.mx.block.scaler import MeanScaler, NOPScaler
 from gluonts.mx.distribution import Distribution, DistributionOutput
 from gluonts.mx.distribution.distribution import getF
-from gluonts.mx.util import weighted_average, mx_switch
+from gluonts.mx.util import weighted_average, mx_switch, assert_shape
 from mxnet import autograd
 
 
@@ -56,7 +56,8 @@ class DeepARNetwork(mx.gluon.HybridBlock):
         minimum_scale: float = 1e-10,
         impute_missing_values: bool = False,
         default_scale: Optional[float] = None,
-        nonnegative_fcsts: bool = False,
+        nonnegative_train_samples: bool = False,
+        nonnegative_pred_samples: bool = False,
         num_samples_for_loss: int = 100,
         **kwargs,
     ) -> None:
@@ -74,7 +75,8 @@ class DeepARNetwork(mx.gluon.HybridBlock):
         self.num_cat = len(cardinality)
         self.scaling = scaling
         self.dtype = dtype
-        self.nonnegative_fcsts = nonnegative_fcsts
+        self.nonnegative_train_samples = nonnegative_train_samples
+        self.nonnegative_pred_samples = nonnegative_pred_samples
         self.num_samples_for_loss = num_samples_for_loss
 
         assert len(cardinality) == len(embedding_dimension), (
@@ -809,17 +811,47 @@ class DeepARNetwork(mx.gluon.HybridBlock):
             Tensor of samples with the same shape.
         """
 
-        if self.nonnegative_fcsts:
+        if self.nonnegative_pred_samples:
             return F.Activation(samples, act_type="relu")
 
         return samples
 
+    def loss(self, F, target: Tensor, distr: Distribution) -> Tensor:
+        """
+        Computes loss given the output of the network in the form of
+        distribution. If nonnegative=True, then we generative
+        nonnegative samples and fit the corresponding base distribution
+        to compute the negative likelihhoods. If nonnegative=False, we
+        compute the negative likelihhoods directly from the distribution.
 
-    def get_samples_for_loss(self, distr: Distribution) -> Tensor:
+        Parameters
+        ----------
+        F
+        target
+            Tensor with shape (batch_size, seq_len)
+        distr
+            Distribution instances
+
+        Returns
+        -------
+        Loss
+            Tensor with shape (batch_size, seq_length)
+        """
+
+        if self.nonnegative_train_samples:
+            samples = self.get_samples_for_loss(F, distr=distr)
+            distr_fit = distr.base_distribution.fit(F, samples=samples)
+            loss = distr_fit.loss(target)
+        else:
+            loss = distr.loss(target)
+
+        return loss
+
+    def get_samples_for_loss(self, F, distr: Distribution) -> Tensor:
         """
         Get samples to compute the final loss. These are samples directly drawn
-        from the given `distr` if coherence is not enforced yet; otherwise the
-        drawn samples are reconciled.
+        from the given `distr` if nonnegativity is not enforced yet; otherwise the
+        drawn samples are nonnegative.
 
         Parameters
         ----------
@@ -829,30 +861,16 @@ class DeepARNetwork(mx.gluon.HybridBlock):
         Returns
         -------
         samples
-            Tensor with shape (num_samples, batch_size, seq_len, target_dim)
+            Tensor with shape (num_samples, batch_size, seq_len)
         """
 
-        # samples shape: (num_samples, batch_size, seq_len, target_dim)
+        # samples shape: (num_samples, batch_size, seq_len)
         samples = distr.sample_rep(
             num_samples=self.num_samples_for_loss, dtype="float32"
         )
 
-        # Determine which epoch we are currently in.
-        self.batch_no += 1
-        epoch_no = self.batch_no // self.num_batches_per_epoch + 1
-        epoch_frac = epoch_no / self.epochs
-
-        if (
-            self.coherent_train_samples
-            and epoch_frac > self.warmstart_epoch_frac
-        ):
-            coherent_samples = reconcile_samples(
-                reconciliation_mat=self.M,
-                samples=samples,
-                seq_axis=self.seq_axis,
-            )
-            assert_shape(coherent_samples, samples.shape)
-            return coherent_samples
+        if self.nonnegative_train_samples:
+            return F.Activation(samples, act_type="softrelu")
         else:
             return samples
 
@@ -1000,11 +1018,10 @@ class DeepARTrainingNetwork(DeepARNetwork):
             dim=1,
         )
 
-        # pedroml: efforts to compute nonnegative fcsts for deepar
-        samples = self.get_samples_for_loss(distr=distr)
+        samples = self.get_samples_for_loss(F, distr=distr)
 
         # (batch_size, seq_len)
-        loss = distr.loss(target)
+        loss = self.loss(F, target=target, distr=distr)
 
         # (batch_size, seq_len, *target_shape)
         observed_values = F.concat(
